@@ -1,4 +1,12 @@
 {
   "name": "test-react",
-  "main": "index.html"
+  "main": "index.html",
+  "webview": {
+    "partitions": [
+      {
+        "name": "trusted",
+        "accessible_resources": ["<all_urls>"]
+      }
+    ]
+  }
 }
