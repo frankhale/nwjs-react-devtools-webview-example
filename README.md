@@ -1,6 +1,6 @@
 # nwjs-react-devtools-webview-example
 
-Reference NW.js issue: `https://github.com/nwjs/nw.js/issues/4878`
+Reference NW.js issue: [https://github.com/nwjs/nw.js/issues/4878](https://github.com/nwjs/nw.js/issues/4878)
 
 Demonstrate that React Devtools is not working when React app is inside a Webview
 
