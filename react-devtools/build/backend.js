@@ -60,9 +60,9 @@
 	var TraceUpdatesBackendManager = __webpack_require__(10);
 	var Bridge = __webpack_require__(19);
 	var inject = __webpack_require__(44);
-	var setupRNStyle = __webpack_require__(54);
-	var setupHighlighter = __webpack_require__(56);
-	var setupRelay = __webpack_require__(60);
+	var setupRNStyle = __webpack_require__(57);
+	var setupHighlighter = __webpack_require__(59);
+	var setupRelay = __webpack_require__(64);
 
 	window.addEventListener('message', welcome);
 	function welcome(evt) {
@@ -223,6 +223,7 @@
 	var Agent = function (_EventEmitter) {
 	  _inherits(Agent, _EventEmitter);
 
+	  // the window or global -> used to "make a value available in the console"
 	  function Agent(global, capabilities) {
 	    _classCallCheck(this, Agent);
 
@@ -255,13 +256,14 @@
 	    if (isReactDOM) {
 	      _this._updateScroll = _this._updateScroll.bind(_this);
 	      window.addEventListener('scroll', _this._onScroll.bind(_this), true);
+	      window.addEventListener('click', _this._onClick.bind(_this), true);
+	      window.addEventListener('mouseover', _this._onMouseOver.bind(_this), true);
+	      window.addEventListener('resize', _this._onResize.bind(_this), true);
 	    }
 	    return _this;
 	  }
 
 	  // returns an "unsubscribe" function
-
-	  // the window or global -> used to "make a value available in the console"
 
 
 	  _createClass(Agent, [{
@@ -311,6 +313,10 @@
 	      });
 	      bridge.on('selected', function (id) {
 	        return _this3.emit('selected', id);
+	      });
+	      bridge.on('setInspectEnabled', function (enabled) {
+	        _this3._inspectEnabled = enabled;
+	        _this3.emit('stopInspecting');
 	      });
 	      bridge.on('shutdown', function () {
 	        return _this3.emit('shutdown');
@@ -383,6 +389,9 @@
 	      this.on('setSelection', function (data) {
 	        return bridge.send('select', data);
 	      });
+	      this.on('setInspectEnabled', function (data) {
+	        return bridge.send('setInspectEnabled', data);
+	      });
 	    }
 	  }, {
 	    key: 'scrollToNode',
@@ -446,12 +455,20 @@
 	  }, {
 	    key: 'selectFromDOMNode',
 	    value: function selectFromDOMNode(node, quiet) {
+	      var offsetFromLeaf = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : 0;
+
 	      var id = this.getIDForNode(node);
 	      if (!id) {
 	        return;
 	      }
-	      this.emit('setSelection', { id: id, quiet: quiet });
+	      this.emit('setSelection', { id: id, quiet: quiet, offsetFromLeaf: offsetFromLeaf });
 	    }
+
+	    // TODO: remove this method because it's breaking encapsulation.
+	    // It was used by RN inspector but this required leaking Fibers to it.
+	    // RN inspector will use selectFromDOMNode() instead now.
+	    // Remove this method in a few months after this comment was added.
+
 	  }, {
 	    key: 'selectFromReactInstance',
 	    value: function selectFromReactInstance(instance, quiet) {
@@ -520,7 +537,7 @@
 	      if (data && data.updater && data.updater.setInContext) {
 	        data.updater.setInContext(path, value);
 	      } else {
-	        console.warn("trying to set state on a component that doesn't support it");
+	        console.warn("trying to set context on a component that doesn't support it");
 	      }
 	    }
 	  }, {
@@ -624,7 +641,43 @@
 	    key: '_updateScroll',
 	    value: function _updateScroll() {
 	      this.emit('refreshMultiOverlay');
+	      this.emit('stopInspecting');
 	      this._scrollUpdate = false;
+	    }
+	  }, {
+	    key: '_onClick',
+	    value: function _onClick(event) {
+	      if (!this._inspectEnabled) {
+	        return;
+	      }
+
+	      var id = this.getIDForNode(event.target);
+	      if (!id) {
+	        return;
+	      }
+
+	      event.stopPropagation();
+	      event.preventDefault();
+
+	      this.emit('setSelection', { id: id });
+	      this.emit('setInspectEnabled', false);
+	    }
+	  }, {
+	    key: '_onMouseOver',
+	    value: function _onMouseOver(event) {
+	      if (this._inspectEnabled) {
+	        var id = this.getIDForNode(event.target);
+	        if (!id) {
+	          return;
+	        }
+
+	        this.highlight(id);
+	      }
+	    }
+	  }, {
+	    key: '_onResize',
+	    value: function _onResize(event) {
+	      this.emit('stopInspecting');
 	    }
 	  }]);
 
@@ -6998,11 +7051,19 @@
 	var getIn = __webpack_require__(9);
 	var performanceNow = __webpack_require__(41);
 
+	// Use the polyfill if the function is not native implementation
+	function getWindowFunction(name, polyfill) {
+	  if (String(window[name]).indexOf('[native code]') === -1) {
+	    return polyfill;
+	  }
+	  return window[name];
+	}
+
 	// Custom polyfill that runs the queue with a backoff.
 	// If you change it, make sure it behaves reasonably well in Firefox.
 	var lastRunTimeMS = 5;
-	var cancelIdleCallback = window.cancelIdleCallback || clearTimeout;
-	var requestIdleCallback = window.requestIdleCallback || function (cb, options) {
+	var cancelIdleCallback = getWindowFunction('cancelIdleCallback', clearTimeout);
+	var requestIdleCallback = getWindowFunction('requestIdleCallback', function (cb, options) {
 	  // Magic numbers determined by tweaking in Firefox.
 	  // There is no special meaning to them.
 	  var delayMS = 3000 * lastRunTimeMS;
@@ -7021,7 +7082,7 @@
 	    var endTime = performanceNow();
 	    lastRunTimeMS = (endTime - startTime) / 1000;
 	  }, delayMS);
-	};
+	});
 
 	/**
 	 * The bridge is responsible for serializing requests between the Agent and
@@ -8349,8 +8410,8 @@
 	'use strict';
 
 	var getData = __webpack_require__(47);
-	var getData012 = __webpack_require__(50);
-	var attachRendererFiber = __webpack_require__(51);
+	var getData012 = __webpack_require__(53);
+	var attachRendererFiber = __webpack_require__(54);
 
 	/**
 	 * This takes care of patching the renderer to emit events on the global
@@ -8580,6 +8641,7 @@
 
 	var copyWithSet = __webpack_require__(48);
 	var getDisplayName = __webpack_require__(49);
+	var traverseAllChildrenImpl = __webpack_require__(50);
 
 	/**
 	 * Convert a react internal instance to a sanitized data object.
@@ -8619,9 +8681,28 @@
 	    children = childrenList(internalInstance._renderedChildren);
 	  } else if (internalInstance._currentElement && internalInstance._currentElement.props) {
 	    // This is a native node without rendered children -- meaning the children
-	    // prop is just a string or (in the case of the <option>) a list of
-	    // strings & numbers.
-	    children = internalInstance._currentElement.props.children;
+	    // prop is the unfiltered list of children.
+	    // This may include 'null' or even other invalid values, so we need to
+	    // filter it the same way that ReactDOM does.
+	    // Instead of pulling in the whole React library, we just copied over the
+	    // 'traverseAllChildrenImpl' method.
+	    // https://github.com/facebook/react/blob/240b84ed8e1db715d759afaae85033718a0b24e1/src/isomorphic/children/ReactChildren.js#L112-L158
+	    var unfilteredChildren = internalInstance._currentElement.props.children;
+	    var filteredChildren = [];
+	    traverseAllChildrenImpl(unfilteredChildren, '', // nameSoFar
+	    function (_traverseContext, child) {
+	      var childType = typeof child === 'undefined' ? 'undefined' : _typeof(child);
+	      if (childType === 'string' || childType === 'number') {
+	        filteredChildren.push(child);
+	      }
+	    });
+	    if (filteredChildren.length <= 1) {
+	      // children must be an array of nodes or a string or undefined
+	      // can't be an empty array
+	      children = filteredChildren.length ? String(filteredChildren[0]) : undefined;
+	    } else {
+	      children = filteredChildren;
+	    }
 	  }
 
 	  if (!props && internalInstance._currentElement && internalInstance._currentElement.props) {
@@ -8682,6 +8763,15 @@
 	    if (inst._renderedChildren) {
 	      children = childrenList(inst._renderedChildren);
 	    }
+	  }
+
+	  if (typeof internalInstance.setNativeProps === 'function') {
+	    // For editing styles in RN
+	    updater = {
+	      setNativeProps: function setNativeProps(nativeProps) {
+	        internalInstance.setNativeProps(nativeProps);
+	      }
+	    };
 	  }
 
 	  return {
@@ -8798,7 +8888,19 @@
 	    return cachedDisplayNames.get(type);
 	  }
 
-	  var displayName = type.displayName || type.name || 'Unknown';
+	  var displayName = void 0;
+
+	  // The displayName property is not guaranteed to be a string.
+	  // It's only safe to use for our purposes if it's a string.
+	  // github.com/facebook/react-devtools/issues/803
+	  if (typeof type.displayName === 'string') {
+	    displayName = type.displayName;
+	  }
+
+	  if (!displayName) {
+	    displayName = type.name || 'Unknown';
+	  }
+
 	  // Facebook-specific hack to turn "Image [from Image.react]" into just "Image".
 	  // We need displayName with module name for error reports but it clutters the DevTools.
 	  var match = displayName.match(FB_MODULE_RE);
@@ -8821,6 +8923,377 @@
 
 /***/ },
 /* 50 */
+/***/ function(module, exports, __webpack_require__) {
+
+	/**
+	 * Copyright (c) 2015-present, Facebook, Inc.
+	 * All rights reserved.
+	 *
+	 * This source code is licensed under the BSD-style license found in the
+	 * LICENSE file in the root directory of this source tree. An additional grant
+	 * of patent rights can be found in the PATENTS file in the same directory.
+	 *
+	 * 
+	 */
+	'use strict';
+
+	var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; };
+
+	var invariant = __webpack_require__(51);
+
+	var SEPARATOR = '.';
+	var SUBSEPARATOR = ':';
+
+	var FAUX_ITERATOR_SYMBOL = '@@iterator'; // Before Symbol spec.
+	// The Symbol used to tag the ReactElement type. If there is no native Symbol
+	// nor polyfill, then a plain number is used for performance.
+	var ITERATOR_SYMBOL = typeof Symbol === 'function' && Symbol.iterator;
+	var REACT_ELEMENT_TYPE = typeof Symbol === 'function' && Symbol.for && Symbol.for('react.element') || 0xeac7;
+
+	/**
+	 * Escape and wrap key so it is safe to use as a reactid
+	 *
+	 * @param {string} key to be escaped.
+	 * @return {string} the escaped key.
+	 */
+	function escape(key) {
+	  var escapeRegex = /[=:]/g;
+	  var escaperLookup = {
+	    '=': '=0',
+	    ':': '=2'
+	  };
+	  var escapedString = ('' + key).replace(escapeRegex, function (match) {
+	    return escaperLookup[match];
+	  });
+
+	  return '$' + escapedString;
+	}
+
+	/**
+	 * Generate a key string that identifies a component within a set.
+	 *
+	 * @param {*} component A component that could contain a manual key.
+	 * @param {number} index Index that is used if a manual key is not provided.
+	 * @return {string}
+	 */
+	function getComponentKey(component, index) {
+	  // Do some typechecking here since we call this blindly. We want to ensure
+	  // that we don't block potential future ES APIs.
+	  if ((typeof component === 'undefined' ? 'undefined' : _typeof(component)) === 'object' && component !== null && component.key != null) {
+	    // Explicit key
+	    return escape(component.key);
+	  }
+	  // Implicit key determined by the index in the set
+	  return index.toString(36);
+	}
+
+	/**
+	 * We do a copied the 'traverseAllChildrenImpl' method from
+	 * `React.Children` so that we don't pull in the whole React library.
+	 * @param {?*} children Children tree container.
+	 * @param {!string} nameSoFar Name of the key path so far.
+	 * @param {!function} callback Callback to invoke with each child found.
+	 * @param {?*} traverseContext Used to pass information throughout the traversal
+	 * process.
+	 * @return {!number} The number of children in this subtree.
+	 */
+	function traverseAllChildrenImpl(children, nameSoFar, callback, traverseContext) {
+	  var type = typeof children === 'undefined' ? 'undefined' : _typeof(children);
+
+	  if (type === 'undefined' || type === 'boolean') {
+	    // All of the above are perceived as null.
+	    children = null;
+	  }
+
+	  if (children === null || type === 'string' || type === 'number' ||
+	  // The following is inlined from ReactElement. This means we can optimize
+	  // some checks. React Fiber also inlines this logic for similar purposes.
+	  type === 'object' && children.$$typeof === REACT_ELEMENT_TYPE) {
+	    callback(traverseContext, children,
+	    // If it's the only child, treat the name as if it was wrapped in an array
+	    // so that it's consistent if the number of children grows.
+	    nameSoFar === '' ? SEPARATOR + getComponentKey(children, 0) : nameSoFar);
+	    return 1;
+	  }
+
+	  var child;
+	  var nextName;
+	  var subtreeCount = 0; // Count of children found in the current subtree.
+	  var nextNamePrefix = nameSoFar === '' ? SEPARATOR : nameSoFar + SUBSEPARATOR;
+
+	  if (Array.isArray(children)) {
+	    for (var i = 0; i < children.length; i++) {
+	      child = children[i];
+	      nextName = nextNamePrefix + getComponentKey(child, i);
+	      subtreeCount += traverseAllChildrenImpl(child, nextName, callback, traverseContext);
+	    }
+	  } else {
+	    var iteratorFn = ITERATOR_SYMBOL && children[ITERATOR_SYMBOL] || children[FAUX_ITERATOR_SYMBOL];
+	    if (typeof iteratorFn === 'function') {
+	      var iterator = iteratorFn.call(children);
+	      var step;
+	      var ii = 0;
+	      while (!(step = iterator.next()).done) {
+	        child = step.value;
+	        nextName = nextNamePrefix + getComponentKey(child, ii++);
+	        subtreeCount += traverseAllChildrenImpl(child, nextName, callback, traverseContext);
+	      }
+	    } else if (type === 'object') {
+	      var addendum = ' If you meant to render a collection of children, use an array ' + 'instead.';
+	      var childrenString = '' + children;
+	      invariant(false, 'The React Devtools cannot render an object as a child. (found: %s).%s', childrenString === '[object Object]' ? 'object with keys {' + Object.keys(children).join(', ') + '}' : childrenString, addendum);
+	    }
+	  }
+
+	  return subtreeCount;
+	}
+
+	module.exports = traverseAllChildrenImpl;
+
+/***/ },
+/* 51 */
+/***/ function(module, exports, __webpack_require__) {
+
+	/* WEBPACK VAR INJECTION */(function(process) {/**
+	 * Copyright 2013-2015, Facebook, Inc.
+	 * All rights reserved.
+	 *
+	 * This source code is licensed under the BSD-style license found in the
+	 * LICENSE file in the root directory of this source tree. An additional grant
+	 * of patent rights can be found in the PATENTS file in the same directory.
+	 *
+	 * @providesModule invariant
+	 */
+
+	'use strict';
+
+	/**
+	 * Use invariant() to assert state which your program assumes to be true.
+	 *
+	 * Provide sprintf-style format (only %s is supported) and arguments
+	 * to provide information about what broke and what you were
+	 * expecting.
+	 *
+	 * The invariant message will be stripped in production, but the invariant
+	 * will remain to ensure logic does not differ in production.
+	 */
+
+	function invariant(condition, format, a, b, c, d, e, f) {
+	  if (process.env.NODE_ENV !== 'production') {
+	    if (format === undefined) {
+	      throw new Error('invariant requires an error message argument');
+	    }
+	  }
+
+	  if (!condition) {
+	    var error;
+	    if (format === undefined) {
+	      error = new Error('Minified exception occurred; use the non-minified dev environment ' + 'for the full error message and additional helpful warnings.');
+	    } else {
+	      var args = [a, b, c, d, e, f];
+	      var argIndex = 0;
+	      error = new Error(format.replace(/%s/g, function () {
+	        return args[argIndex++];
+	      }));
+	      error.name = 'Invariant Violation';
+	    }
+
+	    error.framesToPop = 1; // we don't care about invariant's own frame
+	    throw error;
+	  }
+	}
+
+	module.exports = invariant;
+	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(52)))
+
+/***/ },
+/* 52 */
+/***/ function(module, exports) {
+
+	// shim for using process in browser
+	var process = module.exports = {};
+
+	// cached from whatever global is present so that test runners that stub it
+	// don't break things.  But we need to wrap it in a try catch in case it is
+	// wrapped in strict mode code which doesn't define any globals.  It's inside a
+	// function because try/catches deoptimize in certain engines.
+
+	var cachedSetTimeout;
+	var cachedClearTimeout;
+
+	function defaultSetTimout() {
+	    throw new Error('setTimeout has not been defined');
+	}
+	function defaultClearTimeout () {
+	    throw new Error('clearTimeout has not been defined');
+	}
+	(function () {
+	    try {
+	        if (typeof setTimeout === 'function') {
+	            cachedSetTimeout = setTimeout;
+	        } else {
+	            cachedSetTimeout = defaultSetTimout;
+	        }
+	    } catch (e) {
+	        cachedSetTimeout = defaultSetTimout;
+	    }
+	    try {
+	        if (typeof clearTimeout === 'function') {
+	            cachedClearTimeout = clearTimeout;
+	        } else {
+	            cachedClearTimeout = defaultClearTimeout;
+	        }
+	    } catch (e) {
+	        cachedClearTimeout = defaultClearTimeout;
+	    }
+	} ())
+	function runTimeout(fun) {
+	    if (cachedSetTimeout === setTimeout) {
+	        //normal enviroments in sane situations
+	        return setTimeout(fun, 0);
+	    }
+	    // if setTimeout wasn't available but was latter defined
+	    if ((cachedSetTimeout === defaultSetTimout || !cachedSetTimeout) && setTimeout) {
+	        cachedSetTimeout = setTimeout;
+	        return setTimeout(fun, 0);
+	    }
+	    try {
+	        // when when somebody has screwed with setTimeout but no I.E. maddness
+	        return cachedSetTimeout(fun, 0);
+	    } catch(e){
+	        try {
+	            // When we are in I.E. but the script has been evaled so I.E. doesn't trust the global object when called normally
+	            return cachedSetTimeout.call(null, fun, 0);
+	        } catch(e){
+	            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error
+	            return cachedSetTimeout.call(this, fun, 0);
+	        }
+	    }
+
+
+	}
+	function runClearTimeout(marker) {
+	    if (cachedClearTimeout === clearTimeout) {
+	        //normal enviroments in sane situations
+	        return clearTimeout(marker);
+	    }
+	    // if clearTimeout wasn't available but was latter defined
+	    if ((cachedClearTimeout === defaultClearTimeout || !cachedClearTimeout) && clearTimeout) {
+	        cachedClearTimeout = clearTimeout;
+	        return clearTimeout(marker);
+	    }
+	    try {
+	        // when when somebody has screwed with setTimeout but no I.E. maddness
+	        return cachedClearTimeout(marker);
+	    } catch (e){
+	        try {
+	            // When we are in I.E. but the script has been evaled so I.E. doesn't  trust the global object when called normally
+	            return cachedClearTimeout.call(null, marker);
+	        } catch (e){
+	            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error.
+	            // Some versions of I.E. have different rules for clearTimeout vs setTimeout
+	            return cachedClearTimeout.call(this, marker);
+	        }
+	    }
+
+
+
+	}
+	var queue = [];
+	var draining = false;
+	var currentQueue;
+	var queueIndex = -1;
+
+	function cleanUpNextTick() {
+	    if (!draining || !currentQueue) {
+	        return;
+	    }
+	    draining = false;
+	    if (currentQueue.length) {
+	        queue = currentQueue.concat(queue);
+	    } else {
+	        queueIndex = -1;
+	    }
+	    if (queue.length) {
+	        drainQueue();
+	    }
+	}
+
+	function drainQueue() {
+	    if (draining) {
+	        return;
+	    }
+	    var timeout = runTimeout(cleanUpNextTick);
+	    draining = true;
+
+	    var len = queue.length;
+	    while(len) {
+	        currentQueue = queue;
+	        queue = [];
+	        while (++queueIndex < len) {
+	            if (currentQueue) {
+	                currentQueue[queueIndex].run();
+	            }
+	        }
+	        queueIndex = -1;
+	        len = queue.length;
+	    }
+	    currentQueue = null;
+	    draining = false;
+	    runClearTimeout(timeout);
+	}
+
+	process.nextTick = function (fun) {
+	    var args = new Array(arguments.length - 1);
+	    if (arguments.length > 1) {
+	        for (var i = 1; i < arguments.length; i++) {
+	            args[i - 1] = arguments[i];
+	        }
+	    }
+	    queue.push(new Item(fun, args));
+	    if (queue.length === 1 && !draining) {
+	        runTimeout(drainQueue);
+	    }
+	};
+
+	// v8 likes predictible objects
+	function Item(fun, array) {
+	    this.fun = fun;
+	    this.array = array;
+	}
+	Item.prototype.run = function () {
+	    this.fun.apply(null, this.array);
+	};
+	process.title = 'browser';
+	process.browser = true;
+	process.env = {};
+	process.argv = [];
+	process.version = ''; // empty string to avoid regexp issues
+	process.versions = {};
+
+	function noop() {}
+
+	process.on = noop;
+	process.addListener = noop;
+	process.once = noop;
+	process.off = noop;
+	process.removeListener = noop;
+	process.removeAllListeners = noop;
+	process.emit = noop;
+
+	process.binding = function (name) {
+	    throw new Error('process.binding is not supported');
+	};
+
+	process.cwd = function () { return '/' };
+	process.chdir = function (dir) {
+	    throw new Error('process.chdir is not supported');
+	};
+	process.umask = function() { return 0; };
+
+
+/***/ },
+/* 53 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/**
@@ -8963,7 +9436,7 @@
 	module.exports = getData012;
 
 /***/ },
-/* 51 */
+/* 54 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(Set) {/**
@@ -8978,11 +9451,16 @@
 	 */
 	'use strict';
 
-	var getDataFiber = __webpack_require__(52);
+	var getDataFiber = __webpack_require__(55);
 
-	var _require = __webpack_require__(53),
+	var _require = __webpack_require__(56),
 	    ClassComponent = _require.ClassComponent,
 	    HostRoot = _require.HostRoot;
+
+	// Inlined from ReactTypeOfSideEffect
+
+
+	var PerformedWork = 1;
 
 	function attachRendererFiber(hook, rid, renderer) {
 	  // This is a slightly annoying indirection.
@@ -9007,6 +9485,12 @@
 
 	  function hasDataChanged(prevFiber, nextFiber) {
 	    if (prevFiber.tag === ClassComponent) {
+	      // Skip if the class performed no work (shouldComponentUpdate bailout).
+	      // eslint-disable-next-line no-bitwise
+	      if ((nextFiber.effectTag & PerformedWork) !== PerformedWork) {
+	        return false;
+	      }
+
 	      // Only classes have context.
 	      if (prevFiber.stateNode.context !== nextFiber.stateNode.context) {
 	        return true;
@@ -9240,7 +9724,7 @@
 	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(5)))
 
 /***/ },
-/* 52 */
+/* 55 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/**
@@ -9258,7 +9742,7 @@
 	var copyWithSet = __webpack_require__(48);
 	var getDisplayName = __webpack_require__(49);
 
-	var _require = __webpack_require__(53),
+	var _require = __webpack_require__(56),
 	    FunctionalComponent = _require.FunctionalComponent,
 	    ClassComponent = _require.ClassComponent,
 	    HostRoot = _require.HostRoot,
@@ -9327,12 +9811,25 @@
 	    case HostComponent:
 	      nodeType = 'Native';
 	      name = fiber.type;
+
+	      // TODO (bvaughn) we plan to remove this prefix anyway.
+	      // We can cut this special case out when it's gone.
+	      name = name.replace('topsecret-', '');
+
 	      publicInstance = fiber.stateNode;
 	      props = fiber.memoizedProps;
 	      if (typeof props.children === 'string' || typeof props.children === 'number') {
 	        children = props.children.toString();
 	      } else {
 	        children = [];
+	      }
+	      if (typeof fiber.stateNode.setNativeProps === 'function') {
+	        // For editing styles in RN
+	        updater = {
+	          setNativeProps: function setNativeProps(nativeProps) {
+	            fiber.stateNode.setNativeProps(nativeProps);
+	          }
+	        };
 	      }
 	      break;
 	    case HostText:
@@ -9378,7 +9875,14 @@
 	}
 
 	function setInProps(fiber, path, value) {
-	  fiber.pendingProps = copyWithSet(fiber.memoizedProps, path, value);
+	  var inst = fiber.stateNode;
+	  fiber.pendingProps = copyWithSet(inst.props, path, value);
+	  if (fiber.alternate) {
+	    // We don't know which fiber is the current one because DevTools may bail out of getDataFiber() call,
+	    // and so the data object may refer to another version of the fiber. Therefore we update pendingProps
+	    // on both. I hope that this is safe.
+	    fiber.alternate.pendingProps = fiber.pendingProps;
+	  }
 	  fiber.stateNode.forceUpdate();
 	}
 
@@ -9405,7 +9909,7 @@
 	module.exports = getDataFiber;
 
 /***/ },
-/* 53 */
+/* 56 */
 /***/ function(module, exports) {
 
 	/**
@@ -9437,7 +9941,7 @@
 	};
 
 /***/ },
-/* 54 */
+/* 57 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/**
@@ -9456,7 +9960,9 @@
 
 	function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
 
-	var resolveBoxStyle = __webpack_require__(55);
+	var resolveBoxStyle = __webpack_require__(58);
+
+	var styleOverridesByHostComponentId = {};
 
 	module.exports = function setupRNStyle(bridge, agent, resolveRNStyle) {
 	  bridge.onCall('rn-style:get', function (id) {
@@ -9508,7 +10014,12 @@
 	    bridge.send('rn-style:measure', {});
 	    return;
 	  }
+
 	  var style = resolveRNStyle(node.props.style);
+	  // If it's a host component we edited before, amend styles.
+	  if (styleOverridesByHostComponentId[id]) {
+	    style = Object.assign({}, style, styleOverridesByHostComponentId[id]);
+	  }
 
 	  var instance = node.publicInstance;
 	  if (!instance || !instance.measure) {
@@ -9517,6 +10028,12 @@
 	  }
 
 	  instance.measure(function (x, y, width, height, left, top) {
+	    // RN Android sometimes returns undefined here. Don't send measurements in this case.
+	    // https://github.com/jhen0409/react-native-debugger/issues/84#issuecomment-304611817
+	    if (typeof x !== 'number') {
+	      bridge.send('rn-style:measure', { style: style });
+	      return;
+	    }
 	    var margin = style && resolveBoxStyle('margin', style) || blank;
 	    var padding = style && resolveBoxStyle('padding', style) || blank;
 	    bridge.send('rn-style:measure', {
@@ -9544,42 +10061,60 @@
 	}
 
 	function renameStyle(agent, id, oldName, newName, val) {
+	  var _ref3;
+
 	  var data = agent.elementData.get(id);
-	  var newStyle = _defineProperty({}, newName, val);
-	  if (!data || !data.updater || !data.updater.setInProps) {
-	    var el = agent.internalInstancesById.get(id);
-	    if (el && el.setNativeProps) {
-	      el.setNativeProps({ style: newStyle });
+	  var newStyle = newName ? (_ref3 = {}, _defineProperty(_ref3, oldName, undefined), _defineProperty(_ref3, newName, val), _ref3) : _defineProperty({}, oldName, undefined);
+
+	  if (data && data.updater && data.updater.setInProps) {
+	    // First attempt: use setInProps().
+	    // We do this for composite components, and it works relatively well.
+	    var style = data && data.props && data.props.style;
+	    var customStyle;
+	    if (Array.isArray(style)) {
+	      var lastLength = style.length - 1;
+	      if (_typeof(style[lastLength]) === 'object' && !Array.isArray(style[lastLength])) {
+	        customStyle = shallowClone(style[lastLength]);
+	        delete customStyle[oldName];
+	        if (newName) {
+	          customStyle[newName] = val;
+	        } else {
+	          customStyle[oldName] = undefined;
+	        }
+	        // $FlowFixMe we know that updater is not null here
+	        data.updater.setInProps(['style', lastLength], customStyle);
+	      } else {
+	        style = style.concat([newStyle]);
+	        // $FlowFixMe we know that updater is not null here
+	        data.updater.setInProps(['style'], style);
+	      }
 	    } else {
-	      console.error('Unable to set style for this element... (no forceUpdate or setNativeProps)');
+	      if ((typeof style === 'undefined' ? 'undefined' : _typeof(style)) === 'object') {
+	        customStyle = shallowClone(style);
+	        delete customStyle[oldName];
+	        if (newName) {
+	          customStyle[newName] = val;
+	        } else {
+	          customStyle[oldName] = undefined;
+	        }
+	        // $FlowFixMe we know that updater is not null here
+	        data.updater.setInProps(['style'], customStyle);
+	      } else {
+	        style = [style, newStyle];
+	        data.updater.setInProps(['style'], style);
+	      }
 	    }
-	    return;
-	  }
-	  var style = data && data.props && data.props.style;
-	  var customStyle;
-	  if (Array.isArray(style)) {
-	    if (_typeof(style[style.length - 1]) === 'object' && !Array.isArray(style[style.length - 1])) {
-	      customStyle = shallowClone(style[style.length - 1]);
-	      delete customStyle[oldName];
-	      customStyle[newName] = val;
-	      // $FlowFixMe we know that updater is not null here
-	      data.updater.setInProps(['style', style.length - 1], customStyle);
+	  } else if (data && data.updater && data.updater.setNativeProps) {
+	    // Fallback: use setNativeProps(). We're dealing with a host component.
+	    // Remember to "correct" resolved styles when we read them next time.
+	    if (!styleOverridesByHostComponentId[id]) {
+	      styleOverridesByHostComponentId[id] = newStyle;
 	    } else {
-	      style = style.concat([newStyle]);
-	      // $FlowFixMe we know that updater is not null here
-	      data.updater.setInProps(['style'], style);
+	      Object.assign(styleOverridesByHostComponentId[id], newStyle);
 	    }
+	    data.updater.setNativeProps({ style: newStyle });
 	  } else {
-	    if ((typeof style === 'undefined' ? 'undefined' : _typeof(style)) === 'object') {
-	      customStyle = shallowClone(style);
-	      delete customStyle[oldName];
-	      customStyle[newName] = val;
-	      // $FlowFixMe we know that updater is not null here
-	      data.updater.setInProps(['style'], customStyle);
-	    } else {
-	      style = [style, newStyle];
-	      data.updater.setInProps(['style'], style);
-	    }
+	    return;
 	  }
 	  agent.emit('hideHighlight');
 	}
@@ -9587,34 +10122,42 @@
 	function setStyle(agent, id, attr, val) {
 	  var data = agent.elementData.get(id);
 	  var newStyle = _defineProperty({}, attr, val);
-	  if (!data || !data.updater || !data.updater.setInProps) {
-	    var el = agent.internalInstancesById.get(id);
-	    if (el && el.setNativeProps) {
-	      el.setNativeProps({ style: newStyle });
+
+	  if (data && data.updater && data.updater.setInProps) {
+	    // First attempt: use setInProps().
+	    // We do this for composite components, and it works relatively well.
+	    var style = data.props && data.props.style;
+	    if (Array.isArray(style)) {
+	      var lastLength = style.length - 1;
+	      if (_typeof(style[lastLength]) === 'object' && !Array.isArray(style[lastLength])) {
+	        // $FlowFixMe we know that updater is not null here
+	        data.updater.setInProps(['style', lastLength, attr], val);
+	      } else {
+	        style = style.concat([newStyle]);
+	        // $FlowFixMe we know that updater is not null here
+	        data.updater.setInProps(['style'], style);
+	      }
 	    } else {
-	      console.error('Unable to set style for this element... (no forceUpdate or setNativeProps)');
-	    }
-	    return;
-	  }
-	  var style = data.props && data.props.style;
-	  if (Array.isArray(style)) {
-	    if (_typeof(style[style.length - 1]) === 'object' && !Array.isArray(style[style.length - 1])) {
-	      // $FlowFixMe we know that updater is not null here
-	      data.updater.setInProps(['style', style.length - 1, attr], val);
-	    } else {
-	      style = style.concat([newStyle]);
-	      // $FlowFixMe we know that updater is not null here
+	      style = [style, newStyle];
 	      data.updater.setInProps(['style'], style);
 	    }
+	  } else if (data && data.updater && data.updater.setNativeProps) {
+	    // Fallback: use setNativeProps(). We're dealing with a host component.
+	    // Remember to "correct" resolved styles when we read them next time.
+	    if (!styleOverridesByHostComponentId[id]) {
+	      styleOverridesByHostComponentId[id] = newStyle;
+	    } else {
+	      Object.assign(styleOverridesByHostComponentId[id], newStyle);
+	    }
+	    data.updater.setNativeProps({ style: newStyle });
 	  } else {
-	    style = [style, newStyle];
-	    data.updater.setInProps(['style'], style);
+	    return;
 	  }
 	  agent.emit('hideHighlight');
 	}
 
 /***/ },
-/* 55 */
+/* 58 */
 /***/ function(module, exports) {
 
 	'use strict';
@@ -9680,7 +10223,7 @@
 	module.exports = resolveBoxStyle;
 
 /***/ },
-/* 56 */
+/* 59 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/**
@@ -9695,7 +10238,7 @@
 	 */
 	'use strict';
 
-	var Highlighter = __webpack_require__(57);
+	var Highlighter = __webpack_require__(60);
 
 	module.exports = function setup(agent) {
 	  var hl = new Highlighter(window, function (node) {
@@ -9725,7 +10268,7 @@
 	};
 
 /***/ },
-/* 57 */
+/* 60 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/**
@@ -9744,8 +10287,8 @@
 
 	function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
-	var Overlay = __webpack_require__(58);
-	var MultiOverlay = __webpack_require__(59);
+	var Overlay = __webpack_require__(61);
+	var MultiOverlay = __webpack_require__(63);
 
 	/**
 	 * Manages the highlighting of items on an html page, as well as
@@ -9911,7 +10454,7 @@
 	module.exports = Highlighter;
 
 /***/ },
-/* 58 */
+/* 61 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/**
@@ -9932,6 +10475,14 @@
 
 	var assign = __webpack_require__(7);
 
+	var _require = __webpack_require__(62),
+	    monospace = _require.monospace;
+
+	/**
+	 * Note that this component is not affected by the active Theme,
+	 * Because it highlights elements in the main Chrome window (outside of devtools).
+	 * The colors below were chosen to roughly match those used by Chrome devtools.
+	 */
 	var Overlay = function () {
 	  function Overlay(window) {
 	    _classCallCheck(this, Overlay);
@@ -9956,25 +10507,27 @@
 
 	    this.tip = doc.createElement('div');
 	    assign(this.tip.style, {
-	      border: '1px solid #aaa',
-	      backgroundColor: 'rgb(255, 255, 178)',
-	      fontFamily: 'sans-serif',
-	      color: 'orange',
+	      backgroundColor: '#333740',
+	      borderRadius: '2px',
+	      fontFamily: monospace.family,
+	      fontWeight: 'bold',
 	      padding: '3px 5px',
 	      position: 'fixed',
-	      fontSize: '10px'
+	      fontSize: monospace.sizes.normal
 	    });
 
 	    this.nameSpan = doc.createElement('span');
 	    this.tip.appendChild(this.nameSpan);
 	    assign(this.nameSpan.style, {
-	      color: 'rgb(136, 18, 128)',
-	      marginRight: '5px'
+	      color: '#ee78e6',
+	      borderRight: '1px solid #aaaaaa',
+	      paddingRight: '0.5rem',
+	      marginRight: '0.5rem'
 	    });
 	    this.dimSpan = doc.createElement('span');
 	    this.tip.appendChild(this.dimSpan);
 	    assign(this.dimSpan.style, {
-	      color: '#888'
+	      color: '#d7d7d7'
 	    });
 
 	    this.container.style.zIndex = 10000000;
@@ -10193,7 +10746,41 @@
 	module.exports = Overlay;
 
 /***/ },
-/* 59 */
+/* 62 */
+/***/ function(module, exports) {
+
+	/**
+	 * Copyright (c) 2015-present, Facebook, Inc.
+	 * All rights reserved.
+	 *
+	 * This source code is licensed under the BSD-style license found in the
+	 * LICENSE file in the root directory of this source tree. An additional grant
+	 * of patent rights can be found in the PATENTS file in the same directory.
+	 *
+	 * 
+	 */
+	'use strict';
+
+	module.exports = {
+	  monospace: {
+	    family: 'Menlo, Consolas, monospace',
+	    sizes: {
+	      normal: 11,
+	      large: 14
+	    }
+	  },
+	  sansSerif: {
+	    family: '"Helvetica Neue", "Lucida Grande", -apple-system, BlinkMacSystemFont, "Segoe UI", Ubuntu, sans-serif',
+	    sizes: {
+	      small: 10,
+	      normal: 12,
+	      large: 14
+	    }
+	  }
+	};
+
+/***/ },
+/* 63 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/**
@@ -10280,7 +10867,7 @@
 	module.exports = MultiOverlay;
 
 /***/ },
-/* 60 */
+/* 64 */
 /***/ function(module, exports) {
 
 	/**

@@ -36,7 +36,21 @@
         one.onMessage.addListener(lOne), two.onMessage.addListener(lTwo), one.onDisconnect.addListener(shutdown), 
         two.onDisconnect.addListener(shutdown);
     }
-    var ports = {};
+    function setIconAndPopup(reactBuildType, tabId) {
+        chrome.browserAction.setIcon({
+            tabId: tabId,
+            path: {
+                "16": "icons/16-" + reactBuildType + ".png",
+                "32": "icons/32-" + reactBuildType + ".png",
+                "48": "icons/48-" + reactBuildType + ".png",
+                "128": "icons/128-" + reactBuildType + ".png"
+            }
+        }), chrome.browserAction.setPopup({
+            tabId: tabId,
+            popup: "popups/" + reactBuildType + ".html"
+        });
+    }
+    var ports = {}, IS_FIREFOX = navigator.userAgent.indexOf("Firefox") >= 0;
     chrome.runtime.onConnect.addListener(function(port) {
         var tab = null, name = null;
         isNumeric(port.name) ? (tab = port.name, name = "devtools", installContentScript(+port.name)) : (tab = port.sender.tab.id, 
@@ -44,22 +58,13 @@
             devtools: null,
             "content-script": null
         }), ports[tab][name] = port, ports[tab].devtools && ports[tab]["content-script"] && doublePipe(ports[tab].devtools, ports[tab]["content-script"]);
+    }), IS_FIREFOX && chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
+        tab.active && "loading" === changeInfo.status && setIconAndPopup("disabled", tabId);
     }), chrome.runtime.onMessage.addListener(function(req, sender) {
         if (req.hasDetectedReact && sender.tab) {
             var reactBuildType = req.reactBuildType;
-            sender.tab.url.indexOf("facebook.github.io/react") !== -1 && (reactBuildType = "production"), 
-            chrome.browserAction.setIcon({
-                tabId: sender.tab.id,
-                path: {
-                    "16": "icons/16-" + reactBuildType + ".png",
-                    "32": "icons/32-" + reactBuildType + ".png",
-                    "48": "icons/48-" + reactBuildType + ".png",
-                    "128": "icons/128-" + reactBuildType + ".png"
-                }
-            }), chrome.browserAction.setPopup({
-                tabId: sender.tab.id,
-                popup: "popups/" + reactBuildType + ".html"
-            });
+            sender.url.indexOf("facebook.github.io/react") !== -1 && (reactBuildType = "production"), 
+            setIconAndPopup(reactBuildType, sender.tab.id);
         }
     });
 } ]);
