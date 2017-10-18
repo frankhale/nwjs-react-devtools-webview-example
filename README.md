@@ -4,7 +4,7 @@ Reference NW.js issue: [https://github.com/nwjs/nw.js/issues/4878](https://githu
 
 Demonstrate that React Devtools is  working when React app is inside a Webview
 
-## how to run
+## How To Run
 
 Clone the repository then open a command line to the repository and run:
 
